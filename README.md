@@ -14,12 +14,12 @@
 
 ## Installation
 
-Clone this repo, then 
+Clone this repo, then:
 ```
 conda create -n opencap python=3.7 
 pip install -r requirements.txt
 ```
-Create the `.env` file with all env variables and credentials.
+Create the `.env` file with all env variables and credentials
 
 ## Running the server locally 
 
@@ -40,7 +40,7 @@ Then for deploying to production we pull all the updated code and run the step 3
 
 Instructions in this [Link](https://docs.djangoproject.com/en/4.2/topics/i18n/translation/).
 
-**Note:** You must also install gettext. After install, restart your IDE/Terminal).
+**Note:** You must also install [gettext](https://www.gnu.org/software/gettext/). After install, restart your IDE/Terminal).
 
 Inside of mcserver folder:
 

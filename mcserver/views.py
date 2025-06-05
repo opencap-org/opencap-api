@@ -253,6 +253,14 @@ class SessionViewSet(viewsets.ModelViewSet):
             calibration_trials = session.trial_set.filter(name="calibration")
             last_calibration_trial_num_videos = 0
 
+            # Nothing in calibration - assume mono
+            # In future, we want to set a metadata parameter for isMono - this is a hack to allow us to collect data
+            #if 'sessionWithCalibration' not in (session.meta or {}) and session.trial_set.filter(name="calibration").count() == 0:
+            #    return Response({
+            #    'error_message': error_message,
+            #    'data': 1
+            #    })
+
             # Check if there is a calibration trial. If not, it must be in a parent session.
             loop_counter = 0
             while not calibration_trials and session.meta.get('sessionWithCalibration') and loop_counter < 100:
@@ -1482,16 +1490,27 @@ class TrialViewSet(viewsets.ModelViewSet):
         try:
             ip = get_client_ip(request)
 
-            workerType = self.request.query_params.get('workerType')
+            workerType = self.request.query_params.get('workerType', 'all')
+            isMono = self.request.query_params.get('isMono', 'False')
 
             # find trials with some videos not uploaded
             not_uploaded = Video.objects.filter(video='',
                                                 updated_at__gte=datetime.now() + timedelta(minutes=-15)).values_list("trial__id", flat=True)
+            
+            # Mono automatic check: comment out for now for performance
+            '''
+            # Trials that have only one video
+            only_one_video = Trial.objects.annotate(video_count=Count('video')).filter(video_count=1).values_list("id", flat=True)
 
-            print(not_uploaded)
+            # Exclude both: trials with not-uploaded videos and trials with only one video
+            if isMono == 'True':
+                uploaded_trials = Trial.objects.exclude(id__in=not_uploaded).filter(id__in=only_one_video)
+            else:
+                # Exclude trials with not-uploaded videos and only 1 video
+                uploaded_trials = Trial.objects.exclude(id__in=not_uploaded).exclude(id__in=only_one_video)
+            '''
 
             uploaded_trials = Trial.objects.exclude(id__in=not_uploaded)
-    #       uploaded_trials = Trial.objects.all()
 
             if workerType != 'dynamic':
                 # Priority for 'calibration' and 'neutral'
@@ -1523,7 +1542,10 @@ class TrialViewSet(viewsets.ModelViewSet):
                 raise Http404
 
             # prioritize admin and priority group trials (priority group doesn't exist yet, but should have same priv. as user)
-            trialsPrioritized = trials.filter(session__user__groups__name__in=["admin","priority"])
+            trialsPrioritized = trials.filter(session__user__groups__name__in=["admin"])
+            # if no admin trials, go to priority group trials
+            if trialsPrioritized.count() == 0:
+                trialsPrioritized = trials.filter(session__user__groups__name__in=["priority"])
             # if not priority trials, go to normal trials
             if trialsPrioritized.count() == 0:
                 trialsPrioritized = trials

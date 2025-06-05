@@ -28,6 +28,7 @@ on:
   push:
     branches:
       - dev
+  workflow_dispatch:
 
 name: DEV ECS build & deployment
 
