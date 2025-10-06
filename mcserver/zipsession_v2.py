@@ -336,9 +336,16 @@ def rmtree_with_retry(path, max_retries=5, backoff=0.1):
             shutil.rmtree(path)
             return
         
-        except (FileNotFoundError, PermissionError, OSError) as e:
+        except (PermissionError, OSError) as e:
             if attempt == max_retries - 1:
                 raise
+            time.sleep(backoff * (2**attempt))
+
+        except FileNotFoundError as e:
+            # In case we've made it here, we've made a best effort to delete
+            # and it's likely gone.
+            if attempt == max_retries - 1:
+                return
             time.sleep(backoff * (2**attempt))
 
 def zipdir_contents_with_retry(dir_path, zip_path, max_retries=5, backoff=0.1):
