@@ -71,7 +71,7 @@ router = routers.DefaultRouter()
 
 router.register(r'sessions', SessionViewSet, "session")
 router.register(r'videos', VideoViewSet)
-router.register(r'trials', TrialViewSet)
+router.register(r'trials', TrialViewSet, "trial")
 router.register(r'results', ResultViewSet)
 router.register(r'subjects', SubjectViewSet, "subject")
 router.register(r'subject-tags', SubjectTagViewSet, "subject-tags")
