@@ -1,6 +1,7 @@
 import os
 import pathlib
 import shutil
+import time
 import pickle
 import boto3
 import zipfile
@@ -316,16 +317,56 @@ def zipdir(dir_path, delete_directory_after_zip=True):
     if os.path.isfile(zip_path):
         os.remove(zip_path)
 
-    zip_file = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
-    for root, dirs, files in os.walk(dir_path):
-        for f in files:
-            zip_file.write(
-                os.path.join(root, f), 
-                os.path.relpath(os.path.join(root, f), os.path.join(dir_path, '..'))
-            )
-    zip_file.close()
+    zipdir_contents_with_retry(dir_path, zip_path)
 
-    if delete_directory_after_zip and os.path.exists(dir_path):
-        shutil.rmtree(dir_path)
+    if delete_directory_after_zip:
+        rmtree_with_retry(dir_path)
 
     return zip_path
+
+# Helper functions
+def rmtree_with_retry(path, max_retries=5, backoff=0.1):
+    """
+    Retries shutil.rmtree() to handle both race conditions inherent in the
+    function itself (prior to Python 3.13) and in containers with possible 
+    file system delays or other race conditions.
+    """
+    for attempt in range(max_retries):
+        try:
+            shutil.rmtree(path)
+            return
+
+        except FileNotFoundError as e:
+            # In case we've made it here, we've made a best effort to delete
+            # and it's likely gone.
+            if attempt == max_retries - 1:
+                return
+            time.sleep(backoff * (2**attempt))
+
+        except (PermissionError, OSError) as e:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(backoff * (2**attempt))
+
+def zipdir_contents_with_retry(dir_path, zip_path, max_retries=5, backoff=0.1):
+    """
+    Given a source dir_path and a target zip_path, zip the folder with
+    retrying with exponential backoff to avoid temporary issues with
+    cloud storage.
+    """
+    for attempt in range(max_retries):
+        try:
+            zip_file = zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED)
+            for root, dirs, files in os.walk(dir_path):
+                for f in files:
+                    zip_file.write(
+                        os.path.join(root, f), 
+                        os.path.relpath(os.path.join(root, f), os.path.join(dir_path, '..'))
+                    )
+            zip_file.close()
+            return
+        
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(backoff * (2 ** attempt))

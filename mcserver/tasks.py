@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import time
 from http import HTTPStatus
 from django.conf import settings
 from django.core.files import File
@@ -58,10 +59,10 @@ def download_session_archive(self, session_id, user_id=None):
     try:
         session_dir_path = SessionDirectoryConstructor().build(session_id)
         session_zip_path = zipdir(session_dir_path)
-        with open(session_zip_path, "rb") as archive:
-            log = DownloadLog.objects.create(task_id=str(self.request.id), user_id=user_id)
-            log.media.save(os.path.basename(session_zip_path), archive)
-            os.remove(session_zip_path)
+
+        create_download_log(session_zip_path, self.request.id, user_id)
+        os_remove_with_retry(session_zip_path)
+
     except Exception as e:
         # Delete files and send the traceback to Sentry if something went wrong
         if session_dir_path and os.path.isfile(session_dir_path):
@@ -197,6 +198,45 @@ def submit_cloudwatch_metrics():
     from mcserver.utils import submit_number_of_pending_trials_to_cloudwatch
     submit_number_of_pending_trials_to_cloudwatch()
 
+# Helper functions
+def create_download_log(zip_path, task_id, user_id, 
+                        max_retries=5, backoff=0.1):
+    archive = None
+    for attempt in range(max_retries):
+        try:
+            archive = open(zip_path, "rb")
+            break
+
+        except (FileNotFoundError, PermissionError, OSError) as e:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(backoff * (2**attempt))
+
+    if archive is not None:
+        with archive:
+            log = DownloadLog.objects.create(task_id=task_id, user_id=user_id)
+            log.media.save(os.path.basename(zip_path), archive)
+
+def os_remove_with_retry(path, max_retries=5, backoff=0.1):
+    """
+    os.remove(path) with exponential backoff for robustness in cloud
+    """
+    for attempt in range(max_retries):
+        try:
+            os.remove(path)
+            return
+            
+        except FileNotFoundError as e:
+            # In case we've made it here, we've made a best effort to delete
+            # and it's likely gone.
+            if attempt == max_retries - 1:
+                return
+            time.sleep(backoff * (2**attempt))
+
+        except (PermissionError, OSError) as e:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(backoff * (2**attempt))
 
 # TODO: temporary disabled - need testing
 # @shared_task

@@ -58,7 +58,7 @@ class SessionAdmin(admin.ModelAdmin):
         'public',
         'created_at', 'updated_at', 'server',
         'status', 'status_changed',
-        'trashed', 'trashed_at',
+        'trashed', 'trashed_at', 'isMono',
     )
     raw_id_fields = ('user', 'subject')
     search_fields = ['id', 'user__username', "subject__name"]

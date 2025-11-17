@@ -201,14 +201,16 @@ class SessionSerializer(serializers.ModelSerializer):
         return str(session.id).split("-")[0]
 
     def get_sessionName(self, session):
-        return session.meta.get("sessionName", "") if session.meta else ""
+        if hasattr(session, 'meta') and session.meta:
+            return session.meta.get("sessionName", "")
+        return ""
 
     class Meta:
         model = Session
         fields = [
             'id', 'user', 'public', 'name', 'sessionName',
             'qrcode', 'meta', 'trials', 'server',
-            'subject',
+            'subject', 'isMono',
             'created_at', 'updated_at',
             'trashed', 'trashed_at', 'trials_count', 'trashed_trials_count',
         ]
@@ -226,7 +228,7 @@ class ValidSessionLightSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'public', 'name', 'sessionName',
             'qrcode', 'meta', 'trials', 'server',
-            'subject',
+            'subject', 'isMono',
             'created_at', 'updated_at',
             'trashed', 'trashed_at', 'trials_count', 'trashed_trials_count',
         ]
@@ -254,7 +256,9 @@ class ValidSessionLightSerializer(serializers.ModelSerializer):
         return str(session.id).split("-")[0]
 
     def get_sessionName(self, session):
-        return session.meta.get("sessionName", "")
+        if hasattr(session, 'meta') and session.meta:
+            return session.meta.get("sessionName", "")
+        return ""
 
 
 class SessionStatusSerializer(serializers.ModelSerializer):
@@ -431,3 +435,4 @@ class AnalysisDashboardSerializer(serializers.ModelSerializer):
     class Meta:
         model = AnalysisDashboard
         fields = ('id', 'title', 'function', 'template', 'layout')
+        

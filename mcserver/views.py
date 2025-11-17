@@ -14,7 +14,6 @@ from datetime import datetime, timedelta
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import login
 from django.core.files.base import ContentFile
-from django.utils.timezone import now
 from django.utils import timezone
 from django.http import Http404
 from django.db.models import Q
@@ -169,6 +168,17 @@ class SessionViewSet(viewsets.ModelViewSet):
     serializer_class = SessionSerializer
     permission_classes = [IsPublic | ((IsOwner | IsAdmin | IsBackend))]
 
+    def get_permissions(self):
+        custom_permission_classes = None
+        if self.action == 'status' or self.action == 'get_status':
+            return [AllowAny(), ]
+        elif self.action in ['update', 'partial_update', 'destroy', 
+                             'new', 'rename', 'set_metadata', 'set_subject',
+                             'stop', 'cancel_trial']:
+            custom_permission_classes = [IsOwner | IsAdmin | IsBackend]
+            return [permission() for permission in custom_permission_classes]
+        return super(SessionViewSet, self).get_permissions()
+
     @action(detail=False, methods=['get'], permission_classes=[IsAdmin | IsBackend | IsAuthenticated])
     def search_sessions(self, request):
         """
@@ -215,7 +225,10 @@ class SessionViewSet(viewsets.ModelViewSet):
             if pk == 'undefined':
                 raise ValueError(_("undefined_uuid"))
 
-            session = Session.objects.get(pk=pk)
+            if request.user.groups.filter(name__in=["admin", "backend"]).exists():
+                session = get_object_or_404(Session, pk=pk)
+            else:
+                session = get_object_or_404(Session, pk=pk, user=request.user)
             trial = session.trial_set.filter(name="calibration").order_by("-created_at")[0]
 
             trial.meta = {
@@ -249,17 +262,18 @@ class SessionViewSet(viewsets.ModelViewSet):
                 raise ValueError(_("undefined_uuid"))
 
             error_message = ''
-            session = get_object_or_404(Session, pk=pk)
+            if request.user.groups.filter(name__in=["admin", "backend"]).exists():
+                session = get_object_or_404(Session, pk=pk)
+            else:
+                session = get_object_or_404(Session, pk=pk, user=request.user)
             calibration_trials = session.trial_set.filter(name="calibration")
             last_calibration_trial_num_videos = 0
 
-            # Nothing in calibration - assume mono
-            # In future, we want to set a metadata parameter for isMono - this is a hack to allow us to collect data
-            #if 'sessionWithCalibration' not in (session.meta or {}) and session.trial_set.filter(name="calibration").count() == 0:
-            #    return Response({
-            #    'error_message': error_message,
-            #    'data': 1
-            #    })
+            if session.isMono:
+                return Response({
+                    'error_message': error_message,
+                    'data': 1
+                })
 
             # Check if there is a calibration trial. If not, it must be in a parent session.
             loop_counter = 0
@@ -309,7 +323,7 @@ class SessionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def rename(self, request, pk):
         # Get session.
-        session = get_object_or_404(Session.objects.all(), pk=pk)
+        session = get_object_or_404(Session, pk=pk)
 
         try:
             if pk == 'undefined':
@@ -317,10 +331,12 @@ class SessionViewSet(viewsets.ModelViewSet):
             error_message = ""
 
             # Update session name and save.
+            if not session.meta:
+                session.meta = {}
             session.meta["sessionName"] = request.data['sessionNewName']
             self.check_object_permissions(self.request, session)
             session.save()
-
+            
             serializer = SessionSerializer(session)
         except Http404:
             if settings.DEBUG:
@@ -419,9 +435,10 @@ class SessionViewSet(viewsets.ModelViewSet):
                 sessions = sessions.filter(subject=subject)
 
             # A session is valid only if at least one trial is the "neutral" trial and its status is "done".
+            # OR if it is a monocular session, which doesn't require a neutral trial.
             for session in sessions:
                 trials = Trial.objects.filter(session__exact=session, name__exact="neutral")
-                if trials.count() < 1:
+                if trials.count() < 1 and not session.isMono:
                     sessions = sessions.exclude(id__exact=session.id)
 
             # Sort by
@@ -505,7 +522,7 @@ class SessionViewSet(viewsets.ModelViewSet):
 
             session = get_object_or_404(Session, pk=pk, user=request.user)
             session.trashed = True
-            session.trashed_at = now()
+            session.trashed_at = timezone.now()
             session.save()
 
             serializer = SessionSerializer(session)
@@ -561,8 +578,6 @@ class SessionViewSet(viewsets.ModelViewSet):
 
             user = request.user
 
-            if not user.is_authenticated:
-                user = User.objects.get(id=1)
             session.user = user
             session.save()
 
@@ -601,7 +616,7 @@ class SessionViewSet(viewsets.ModelViewSet):
                 raise ValueError(_("undefined_uuid"))
 
             session = get_object_or_404(Session, pk=pk, user=request.user)
-       
+
             # get the QR code from the database
             if session.qrcode:
                 qr = session.qrcode
@@ -627,6 +642,14 @@ class SessionViewSet(viewsets.ModelViewSet):
 
             res = {'qr': url}
 
+        except Http404:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_("session_uuid_not_found") % {"uuid": str(pk)})
+        except ValueError:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_("session_uuid_not_valid") % {"uuid": str(pk)})
         except Exception:
             if settings.DEBUG:
                 raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
@@ -700,11 +723,6 @@ class SessionViewSet(viewsets.ModelViewSet):
 
         return Response(serializer.data)
 
-
-    def get_permissions(self):
-        if self.action == 'status' or self.action == 'get_status':
-            return [AllowAny(), ]
-        return super(SessionViewSet, self).get_permissions()
     
     def get_status(self, request, pk):
         if pk == 'undefined':
@@ -893,6 +911,8 @@ class SessionViewSet(viewsets.ModelViewSet):
     @action(detail=True)
     def download(self, request, pk):
         try:
+            session = get_object_or_404(Session, pk=pk)
+            self.check_object_permissions(request, session)
             # Extract protocol and host.
             if request.is_secure():
                 host = "https://" + request.get_host()
@@ -901,6 +921,10 @@ class SessionViewSet(viewsets.ModelViewSet):
 
             session_zip = downloadAndZipSession(pk, host=host)
 
+        except PermissionDenied:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_('permission_denied'))
         except Exception:
             if settings.DEBUG:
                 raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
@@ -927,6 +951,11 @@ class SessionViewSet(viewsets.ModelViewSet):
                 task = download_session_archive.delay(session.id, request.user.id)
             else:
                 task = download_session_archive.delay(session.id)
+        
+        except PermissionDenied:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_('permission_denied'))
         except Exception:
             if settings.DEBUG:
                 raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
@@ -1030,8 +1059,7 @@ class SessionViewSet(viewsets.ModelViewSet):
                 raise ValueError(_("undefined_uuid"))
 
             session = get_object_or_404(Session, pk=pk)
-
-
+            self.check_object_permissions(self.request, session)
             if not session.meta:
                 session.meta = {}
         
@@ -1045,6 +1073,10 @@ class SessionViewSet(viewsets.ModelViewSet):
                     "datasharing": request.GET.get("subject_data_sharing",""),
                     "posemodel": request.GET.get("subject_pose_model",""),
                 }
+
+            if "isMono" in request.GET:
+                session.isMono = request.GET.get("isMono", "").lower() == 'true'
+
 
             if "settings_framerate" in request.GET:
                 session.meta["settings"] = {
@@ -1105,6 +1137,10 @@ class SessionViewSet(viewsets.ModelViewSet):
             if settings.DEBUG:
                 raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
             raise NotFound(_("session_uuid_not_valid") % {"uuid": str(pk)})
+        except PermissionDenied:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_('permission_denied'))
         except Exception:
             if settings.DEBUG:
                 raise APIException("Error: " + traceback.format_exc())
@@ -1167,6 +1203,7 @@ class SessionViewSet(viewsets.ModelViewSet):
                 raise ValueError(_("undefined_uuid"))
 
             session = get_object_or_404(Session, pk=pk)
+            self.check_object_permissions(self.request, session)
             trials = session.trial_set.order_by("-created_at")
 
             # name = request.GET.get("name",None)
@@ -1219,6 +1256,10 @@ class SessionViewSet(viewsets.ModelViewSet):
             if settings.DEBUG:
                 raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
             raise NotFound(_("session_uuid_not_valid") % {"uuid": str(pk)})
+        except PermissionDenied:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_('permission_denied'))
         except Exception:
             if settings.DEBUG:
                 raise APIException("Error: " + traceback.format_exc())
@@ -1237,6 +1278,7 @@ class SessionViewSet(viewsets.ModelViewSet):
                 raise ValueError(_("undefined_uuid"))
 
             session = get_object_or_404(Session, pk=pk)
+            self.check_object_permissions(self.request, session)
             trials = session.trial_set.order_by("-created_at")
 
             # If there is at least one trial, check its status
@@ -1255,6 +1297,10 @@ class SessionViewSet(viewsets.ModelViewSet):
             if settings.DEBUG:
                 raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
             raise NotFound(_("session_uuid_not_valid") % {"uuid": str(pk)})
+        except PermissionDenied:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_('permission_denied'))
         except Exception:
             if settings.DEBUG:
                 raise APIException("Error: " + traceback.format_exc())
@@ -1480,37 +1526,56 @@ class SessionViewSet(viewsets.ModelViewSet):
 # - if no it asks again in 5 sec
 # - if yes it runs processing and sends back the results
 class TrialViewSet(viewsets.ModelViewSet):
-    queryset = Trial.objects.all().order_by("created_at")
     serializer_class = TrialSerializer
-
     permission_classes = [IsPublic | (IsOwner | IsAdmin | IsBackend)]
+
+    def get_queryset(self):
+        user = self.request.user
+        # Admins and backend users see all trials
+        if user.is_authenticated and user.groups.filter(name__in=["admin", "backend"]).exists():
+            return Trial.objects.all().order_by("created_at")
+        # Authenticated users see their own trials and public trials
+        elif user.is_authenticated:
+            return Trial.objects.filter(
+                Q(session__user=user) | Q(session__public=True)
+            ).order_by("created_at")
+        # Unauthenticated users see only public trials
+        else:
+            return Trial.objects.filter(session__public=True).order_by("created_at")
+        
+    def get_permissions(self):
+        custom_permission_classes = None
+        if self.action in ['dequeue', 'get_trials_with_status']:
+            custom_permission_classes = [IsAdmin | IsBackend]
+        elif self.request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
+            custom_permission_classes = [IsOwner | IsAdmin | IsBackend]
+        
+        if custom_permission_classes is not None:
+            return [permission() for permission in custom_permission_classes]
+        
+        return super().get_permissions()
     
-    @action(detail=False, permission_classes=[((IsAdmin | IsBackend))])
+    @action(detail=False)
     def dequeue(self, request):
         try:
             ip = get_client_ip(request)
 
             workerType = self.request.query_params.get('workerType', 'all')
-            isMono = self.request.query_params.get('isMono', 'False')
+            isMonoQuery = self.request.query_params.get('isMono', 'False')
+
+
 
             # find trials with some videos not uploaded
             not_uploaded = Video.objects.filter(video='',
-                                                updated_at__gte=datetime.now() + timedelta(minutes=-15)).values_list("trial__id", flat=True)
+                                                updated_at__gte=timezone.now() + timedelta(minutes=-15)).values_list("trial__id", flat=True)
             
-            # Mono automatic check: comment out for now for performance
-            '''
-            # Trials that have only one video
-            only_one_video = Trial.objects.annotate(video_count=Count('video')).filter(video_count=1).values_list("id", flat=True)
 
-            # Exclude both: trials with not-uploaded videos and trials with only one video
-            if isMono == 'True':
-                uploaded_trials = Trial.objects.exclude(id__in=not_uploaded).filter(id__in=only_one_video)
+            if isMonoQuery == 'False':
+                uploaded_trials = Trial.objects.filter(updated_at__gte=timezone.now() + timedelta(days=-7)).exclude(
+                                                        id__in=not_uploaded).exclude(session__isMono=True)
             else:
-                # Exclude trials with not-uploaded videos and only 1 video
-                uploaded_trials = Trial.objects.exclude(id__in=not_uploaded).exclude(id__in=only_one_video)
-            '''
-
-            uploaded_trials = Trial.objects.exclude(id__in=not_uploaded)
+                uploaded_trials = Trial.objects.filter(updated_at__gte=timezone.now() + timedelta(days=-7)).exclude(
+                                                        id__in=not_uploaded).filter(session__isMono=True)
 
             if workerType != 'dynamic':
                 # Priority for 'calibration' and 'neutral'
@@ -1540,7 +1605,7 @@ class TrialViewSet(viewsets.ModelViewSet):
 
             if trials.count() == 0 and trialsReprocess.count() == 0:
                 raise Http404
-
+            
             # prioritize admin and priority group trials (priority group doesn't exist yet, but should have same priv. as user)
             trialsPrioritized = trials.filter(session__user__groups__name__in=["admin"])
             # if no admin trials, go to priority group trials
@@ -1559,8 +1624,6 @@ class TrialViewSet(viewsets.ModelViewSet):
             trial.processed_count += 1
             trial.save()
 
-            print(ip)
-            print(trial.session.server)
             if (not trial.session.server) or len(trial.session.server) < 1:
                 session = Session.objects.get(id=trial.session.id)
                 session.server = ip
@@ -1576,8 +1639,8 @@ class TrialViewSet(viewsets.ModelViewSet):
             raise APIException(_('trial_dequeue_error'))
 
         return Response(serializer.data)
-    
-    @action(detail=False, permission_classes=[((IsAdmin | IsBackend))])
+
+    @action(detail=False)
     def get_trials_with_status(self, request):
         """
         This view returns a list of all the trials with the specified status
@@ -1589,7 +1652,7 @@ class TrialViewSet(viewsets.ModelViewSet):
         status = self.request.query_params.get('status')
         # trials with given status and updated_at more than n hours ago
         trials = Trial.objects.filter(status=status,
-                                     updated_at__lte=(datetime.now() - timedelta(hours=hours_since_update))).order_by("-created_at")
+                                     updated_at__lte=(timezone.now() - timedelta(hours=hours_since_update))).order_by("-created_at")
         
         serializer = TrialSerializer(trials, many=True)
 
@@ -1602,7 +1665,10 @@ class TrialViewSet(viewsets.ModelViewSet):
                 raise ValueError(_("undefined_uuid"))
 
             # Get trial.
-            trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
+            if request.user.groups.filter(name__in=["admin", "backend"]).exists():
+                trial = get_object_or_404(Trial, pk=pk)
+            else:
+                trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
 
             # Update trial name and save.
             trial.name = request.data['trialNewName']
@@ -1635,7 +1701,10 @@ class TrialViewSet(viewsets.ModelViewSet):
             if pk == 'undefined':
                 raise ValueError(_("undefined_uuid"))
 
-            trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
+            if request.user.groups.filter(name__in=["admin", "backend"]).exists():
+                trial = get_object_or_404(Trial, pk=pk)
+            else:
+                trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
             trial.delete()
 
         except Http404:
@@ -1659,9 +1728,12 @@ class TrialViewSet(viewsets.ModelViewSet):
             if pk == 'undefined':
                 raise ValueError(_("undefined_uuid"))
 
-            trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
+            if request.user.groups.filter(name__in=["admin", "backend"]).exists():
+                trial = get_object_or_404(Trial, pk=pk)
+            else:
+                trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
             trial.trashed = True
-            trial.trashed_at = now()
+            trial.trashed_at = timezone.now()
             trial.save()
 
             serializer = TrialSerializer(trial)
@@ -1687,7 +1759,10 @@ class TrialViewSet(viewsets.ModelViewSet):
             if pk == 'undefined':
                 raise ValueError(_("undefined_uuid"))
 
-            trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
+            if request.user.groups.filter(name__in=["admin", "backend"]).exists():
+                trial = get_object_or_404(Trial, pk=pk)
+            else:
+                trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
             trial.trashed = False
             trial.trashed_at = None
             trial.save()
@@ -1718,7 +1793,10 @@ class TrialViewSet(viewsets.ModelViewSet):
             tags = request.data['trialNewTags']
 
             # Get trial.
-            trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
+            if request.user.groups.filter(name__in=["admin", "backend"]).exists():
+                trial = get_object_or_404(Trial, pk=pk)
+            else:
+                trial = get_object_or_404(Trial, pk=pk, session__user=request.user)
 
             # Remove previous tags.
             if TrialTags.objects.filter(trial=trial).exists():
@@ -1800,7 +1878,7 @@ class SubjectViewSet(viewsets.ModelViewSet):
         for the currently authenticated user.
         """
         user = self.request.user
-        if (user.is_authenticated and user.id == 1) or (user.is_authenticated and user.id == 2):
+        if user.is_authenticated and user.groups.filter(name__in=["admin", "backend"]).exists():
             return Subject.objects.all().prefetch_related('subjecttags_set')
         # public_subject_ids = Session.objects.filter(public=True).values_list('subject_id', flat=True).distinct()
         # return Subject.objects.filter(Q(user=user) | Q(id__in=public_subject_ids)).prefetch_related('subjecttags_set')
@@ -1861,7 +1939,7 @@ class SubjectViewSet(viewsets.ModelViewSet):
 
             subject = get_object_or_404(Subject, pk=pk, user=request.user)
             subject.trashed = True
-            subject.trashed_at = now()
+            subject.trashed_at = timezone.now()
             subject.save()
 
             serializer = SubjectSerializer(subject)
