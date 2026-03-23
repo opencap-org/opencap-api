@@ -279,6 +279,12 @@ class SessionFilteringSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=64, required=False)
 
 
+class MonoSessionFilterSerializer(serializers.Serializer):
+    date_from = serializers.DateField(required=False)
+    date_to = serializers.DateField(required=False)
+    status = serializers.CharField(max_length=64, required=False)
+
+
 class TagSerializer(serializers.ModelSerializer):
     class Meta:
         model = SubjectTags
