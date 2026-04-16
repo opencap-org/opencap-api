@@ -201,6 +201,43 @@ class SessionViewSet(viewsets.ModelViewSet):
         serializer = SessionSerializer(sessions, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'], permission_classes=[IsAdmin | IsBackend | IsAuthenticated])
+    def get_mono_sessions(self, request):
+        """
+        Returns sessions where isMono=True, optionally filtered by created_at date range and status.
+        Usage: /sessions/get_mono_sessions/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD&status=done
+        """
+        from .serializers import MonoSessionFilterSerializer
+
+        filter_serializer = MonoSessionFilterSerializer(data=request.query_params)
+        if not filter_serializer.is_valid():
+            return Response(filter_serializer.errors, status=400)
+
+        filter_kwargs = {'isMono': True}
+        date_from = filter_serializer.validated_data.get('date_from')
+        date_to = filter_serializer.validated_data.get('date_to')
+        status = filter_serializer.validated_data.get('status')
+
+        if date_from is None and date_to is None:
+            today = timezone.now().date()
+            filter_kwargs['created_at__date__gte'] = today - timedelta(days=30)
+            filter_kwargs['created_at__date__lte'] = today
+        else:
+            if date_from:
+                filter_kwargs['created_at__date__gte'] = date_from
+            if date_to:
+                filter_kwargs['created_at__date__lte'] = date_to
+
+        if status:
+            filter_kwargs['status'] = status
+
+        if not IsAdmin().has_permission(request, self) and not IsBackend().has_permission(request, self):
+            filter_kwargs['user'] = request.user
+
+        sessions = Session.objects.filter(**filter_kwargs).order_by("-created_at")
+        serializer = SessionSerializer(sessions, many=True)
+        return Response(serializer.data)
+
     @setup_eager_loading
     def get_queryset(self):
         """

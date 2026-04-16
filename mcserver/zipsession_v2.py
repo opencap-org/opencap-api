@@ -148,6 +148,9 @@ class SessionDirectoryConstructor:
                 result.media,
                 os.path.join(kinematics_root, f"{trial.formated_name}.mot")
             )
+            # Collect the model when we're in a mono trial (there is no neutral trial and thus no model in neutral so we download the model for each trial)
+            if trial.session.isMono:
+                self.collect_opensim_model_files(trial, isMono=True) 
     
     def collect_geometry_vtp_files_from_s3(self, model_name):
         s3 = boto3.client("s3")
@@ -161,7 +164,7 @@ class SessionDirectoryConstructor:
                 os.path.join(geometry_dir, f"{name}.vtp")
             )
 
-    def collect_opensim_model_files(self, trial):
+    def collect_opensim_model_files(self, trial, isMono=False):
         root_dir_path = self.get_root_dir_path()
         opensim_result = trial.result_set.filter(tag=ResultTag.OPENSIM_MODEL.value).first()
         if opensim_result:
@@ -169,6 +172,8 @@ class SessionDirectoryConstructor:
                 opensim_result.media.url
             ).path.split('-')[-1]
             model_root = os.path.join(root_dir_path, "OpenSimData", "Model")
+            if isMono:
+                model_root = os.path.join(model_root, trial.formated_name)
             os.makedirs(model_root, exist_ok=True)
             self.download_file_from_s3(
                 opensim_result.media,
