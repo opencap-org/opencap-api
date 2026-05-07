@@ -1149,7 +1149,12 @@ class SessionViewSet(viewsets.ModelViewSet):
                 if not session.meta["settings"]:
                     session.meta["settings"] = {}
                 session.meta["settings"]["scalingsetup"] = request.GET.get("settings_scaling_setup", "")
-            
+
+            if "settings_synchronization_version" in request.GET:
+                if not session.meta["settings"]:
+                    session.meta["settings"] = {}
+                session.meta["settings"]["sync_ver"] = request.GET.get("settings_synchronization_version", "")
+
             if "cb_square" in request.GET:
                 session.meta["checkerboard"] = {
                     "square_size": request.GET.get("cb_square",""),
