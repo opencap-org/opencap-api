@@ -142,7 +142,7 @@ class ResultAdmin(admin.ModelAdmin):
 @admin.register(Video)
 class VideoAdmin(admin.ModelAdmin):
     search_fields = ['id', 'trial__id']
-    list_display = ('id', 'trial', 'video', 'created_at', 'updated_at')
+    list_display = ('id', 'trial', 'video', 'isLidar', 'created_at', 'updated_at')
     raw_id_fields = ('trial',)
 
 
