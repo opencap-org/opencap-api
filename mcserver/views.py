@@ -1881,6 +1881,9 @@ class VideoViewSet(viewsets.ModelViewSet):
             serializer.validated_data["video"] = serializer.validated_data["video_url"]
             del serializer.validated_data["video_url"]
 
+        if "isLidar" in self.request.data:
+            serializer.validated_data["isLidar"] = str(self.request.data.get("isLidar", "")).lower() == "true"
+
         super().perform_update(serializer)
 
 class ResultViewSet(viewsets.ModelViewSet):
