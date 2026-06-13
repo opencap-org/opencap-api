@@ -125,7 +125,7 @@ class TrialAdmin(admin.ModelAdmin):
         qs = super().get_queryset(request)
         lidar_videos = Video.objects.filter(
             trial=OuterRef('pk'),
-            parameters__has_lidar_data=True,
+            isLidar=True,
         )
         return qs.annotate(_has_lidar_data=Exists(lidar_videos))
 
