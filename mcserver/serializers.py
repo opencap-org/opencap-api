@@ -16,8 +16,22 @@ from mcserver.models import (
     TrialTags
 )
 from rest_framework.validators import UniqueValidator
-from django.db.models import Prefetch, Q
+from django.db.models import Prefetch, Q, Exists, OuterRef
 from django.utils.translation import gettext as _
+
+
+def annotate_has_lidar_data(queryset):
+    lidar_videos = Video.objects.filter(
+        trial=OuterRef('pk'),
+        parameters__has_lidar_data=True,
+    )
+    return queryset.annotate(_has_lidar_data=Exists(lidar_videos))
+
+
+def trial_has_lidar_data(trial):
+    if hasattr(trial, '_has_lidar_data'):
+        return trial._has_lidar_data
+    return trial.video_set.filter(parameters__has_lidar_data=True).exists()
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -147,7 +161,15 @@ class ResultSerializer(serializers.ModelSerializer):
 class TrialSerializer(serializers.ModelSerializer):
     videos = VideoSerializer(source='video_set', many=True)
     results = ResultSerializer(source='result_set', many=True)
-    
+    hasLidarData = serializers.SerializerMethodField()
+
+    @staticmethod
+    def setup_eager_loading(queryset):
+        return annotate_has_lidar_data(queryset)
+
+    def get_hasLidarData(self, trial):
+        return trial_has_lidar_data(trial)
+
     class Meta:
         model = Trial
         fields = [
@@ -156,7 +178,7 @@ class TrialSerializer(serializers.ModelSerializer):
             'server', 'is_docker', 'hostname',
             'processed_duration', 'processed_count',
             'git_commit',
-            'trashed', 'trashed_at',
+            'trashed', 'trashed_at', 'hasLidarData',
         ]
 
 
@@ -173,7 +195,12 @@ class SessionSerializer(serializers.ModelSerializer):
     @staticmethod
     def setup_eager_loading(queryset):
         # queryset = queryset.prefetch_related("trial_set").all()
-        queryset = queryset.prefetch_related(Prefetch('trial_set', queryset=Trial.objects.order_by('created_at'))).all()
+        queryset = queryset.prefetch_related(
+            Prefetch(
+                'trial_set',
+                queryset=annotate_has_lidar_data(Trial.objects.order_by('created_at')),
+            )
+        ).all()
 
         return queryset
 
