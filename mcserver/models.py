@@ -178,6 +178,7 @@ class Video(models.Model):
     video_thumb = models.FileField(blank=True, null=True, upload_to=random_filename)
     keypoints = models.FileField(blank=True, null=True)
     parameters = models.JSONField(blank=True, null=True)
+    isLidar = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
 
