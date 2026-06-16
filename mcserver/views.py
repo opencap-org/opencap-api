@@ -11,6 +11,7 @@ import socket
 
 from datetime import datetime, timedelta
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import login
 from django.core.files.base import ContentFile
@@ -1593,7 +1594,7 @@ class TrialViewSet(viewsets.ModelViewSet):
             return [permission() for permission in custom_permission_classes]
 
         return super().get_permissions()
-    
+
     @action(detail=False)
     def dequeue(self, request):
         try:
@@ -1602,76 +1603,81 @@ class TrialViewSet(viewsets.ModelViewSet):
             workerType = self.request.query_params.get('workerType', 'all')
             isMonoQuery = self.request.query_params.get('isMono', 'False')
 
+            # Use a transaction to ensure atomicity
+            with transaction.atomic():
+                # find trials with some videos not uploaded
+                not_uploaded = Video.objects.filter(video='',
+                                                    updated_at__gte=timezone.now() + timedelta(
+                                                        minutes=-15)).values_list("trial__id", flat=True)
 
+                if isMonoQuery == 'False':
+                    uploaded_trials = Trial.objects.filter(updated_at__gte=timezone.now() + timedelta(days=-7)).exclude(
+                        id__in=not_uploaded).exclude(session__isMono=True).select_for_update(skip_locked=True)
+                else:
+                    uploaded_trials = Trial.objects.filter(updated_at__gte=timezone.now() + timedelta(days=-7)).exclude(
+                        id__in=not_uploaded).filter(session__isMono=True).select_for_update(skip_locked=True)
 
-            # find trials with some videos not uploaded
-            not_uploaded = Video.objects.filter(video='',
-                                                updated_at__gte=timezone.now() + timedelta(minutes=-15)).values_list("trial__id", flat=True)
-            
-
-            if isMonoQuery == 'False':
-                uploaded_trials = Trial.objects.filter(updated_at__gte=timezone.now() + timedelta(days=-7)).exclude(
-                                                        id__in=not_uploaded).exclude(session__isMono=True)
-            else:
-                uploaded_trials = Trial.objects.filter(updated_at__gte=timezone.now() + timedelta(days=-7)).exclude(
-                                                        id__in=not_uploaded).filter(session__isMono=True)
-
-            if workerType != 'dynamic':
-                # Priority for 'calibration' and 'neutral'
-                trials = uploaded_trials.filter(status="stopped",
-                                          name__in=["calibration","neutral"],
-                                          result=None)
-
-                trialsReprocess = uploaded_trials.filter(status="reprocess",
-                                          name__in=["calibration","neutral"],
-                                          result=None)
-
-                if trials.count() == 0 and workerType != 'calibration':
+                if workerType != 'dynamic':
+                    # Priority for 'calibration' and 'neutral'
                     trials = uploaded_trials.filter(status="stopped",
-                                              result=None)
+                                                    name__in=["calibration", "neutral"],
+                                                    result=None)
 
-                if trials.count()==0 and trialsReprocess.count() == 0 and workerType != 'calibration':
                     trialsReprocess = uploaded_trials.filter(status="reprocess",
-                                              result=None)
+                                                             name__in=["calibration", "neutral"],
+                                                             result=None)
 
-            else:
-                trials = uploaded_trials.filter(status="stopped",
-                                                result=None).exclude(name__in=["calibration", "neutral"])
+                    if trials.count() == 0 and workerType != 'calibration':
+                        trials = uploaded_trials.filter(status="stopped",
+                                                        result=None)
 
-                trialsReprocess = uploaded_trials.filter(status="reprocess",
-                                                result=None).exclude(name__in=["calibration", "neutral"])
+                    if trials.count() == 0 and trialsReprocess.count() == 0 and workerType != 'calibration':
+                        trialsReprocess = uploaded_trials.filter(status="reprocess",
+                                                                 result=None)
 
+                else:
+                    trials = uploaded_trials.filter(status="stopped",
+                                                    result=None).exclude(name__in=["calibration", "neutral"])
 
-            if trials.count() == 0 and trialsReprocess.count() == 0:
-                raise Http404
-            
-            # prioritize admin and priority group trials (priority group doesn't exist yet, but should have same priv. as user)
-            trialsPrioritized = trials.filter(session__user__groups__name__in=["admin"])
-            # if no admin trials, go to priority group trials
-            if trialsPrioritized.count() == 0:
-                trialsPrioritized = trials.filter(session__user__groups__name__in=["priority"])
-            # if not priority trials, go to normal trials
-            if trialsPrioritized.count() == 0:
-                trialsPrioritized = trials
-            # if no normal trials, go to reprocess trials
-            if trials.count() == 0:
-                trialsPrioritized = trialsReprocess
+                    trialsReprocess = uploaded_trials.filter(status="reprocess",
+                                                             result=None).exclude(name__in=["calibration", "neutral"])
 
-            trial = trialsPrioritized[0]
-            trial.status = "processing"
-            trial.server = ip
-            trial.processed_count += 1
-            trial.save()
+                if trials.count() == 0 and trialsReprocess.count() == 0:
+                    raise Http404
 
-            if (not trial.session.server) or len(trial.session.server) < 1:
-                session = Session.objects.get(id=trial.session.id)
-                session.server = ip
-                session.save()
+                # prioritize admin and priority group trials (priority group doesn't exist yet, but should have same priv. as user)
+                trialsPrioritized = trials.filter(session__user__groups__name__in=["admin"])
+                # if no admin trials, go to priority group trials
+                if trialsPrioritized.count() == 0:
+                    trialsPrioritized = trials.filter(session__user__groups__name__in=["priority"])
+                # if not priority trials, go to normal trials
+                if trialsPrioritized.count() == 0:
+                    trialsPrioritized = trials
+                # if no normal trials, go to reprocess trials
+                if trials.count() == 0:
+                    trialsPrioritized = trialsReprocess
 
-            serializer = TrialSerializer(trial, many=False)
+                trial = trialsPrioritized[0]
+
+                # Double-check that the trial is still in a claimable state
+                # This prevents race conditions where another worker might have claimed it
+                if trial.status not in ["stopped", "reprocess"]:
+                    raise Http404
+
+                trial.status = "processing"
+                trial.server = ip
+                trial.processed_count += 1
+                trial.save()
+
+                if (not trial.session.server) or len(trial.session.server) < 1:
+                    session = Session.objects.get(id=trial.session.id)
+                    session.server = ip
+                    session.save()
+
+                serializer = TrialSerializer(trial, many=False)
 
         except Http404:
-            raise Http404 # we use the 404 to tell app.py that there are no trials, so need to pass this thru
+            raise Http404  # we use the 404 to tell app.py that there are no trials, so need to pass this thru
         except Exception:
             if settings.DEBUG:
                 raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
