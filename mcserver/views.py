@@ -1563,9 +1563,11 @@ class SessionViewSet(viewsets.ModelViewSet):
 # - if no it asks again in 5 sec
 # - if yes it runs processing and sends back the results
 class TrialViewSet(viewsets.ModelViewSet):
+    queryset = Trial.objects.all().order_by("created_at")
     serializer_class = TrialSerializer
     permission_classes = [IsPublic | (IsOwner | IsAdmin | IsBackend)]
 
+    @setup_eager_loading
     def get_queryset(self):
         user = self.request.user
         # Admins and backend users see all trials
@@ -1579,17 +1581,17 @@ class TrialViewSet(viewsets.ModelViewSet):
         # Unauthenticated users see only public trials
         else:
             return Trial.objects.filter(session__public=True).order_by("created_at")
-        
+
     def get_permissions(self):
         custom_permission_classes = None
         if self.action in ['dequeue', 'get_trials_with_status']:
             custom_permission_classes = [IsAdmin | IsBackend]
         elif self.request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
             custom_permission_classes = [IsOwner | IsAdmin | IsBackend]
-        
+
         if custom_permission_classes is not None:
             return [permission() for permission in custom_permission_classes]
-        
+
         return super().get_permissions()
     
     @action(detail=False)
@@ -1878,6 +1880,9 @@ class VideoViewSet(viewsets.ModelViewSet):
         if ("video_url" in serializer.validated_data) and (serializer.validated_data["video_url"]):
             serializer.validated_data["video"] = serializer.validated_data["video_url"]
             del serializer.validated_data["video_url"]
+
+        if "isLidar" in self.request.data:
+            serializer.validated_data["isLidar"] = str(self.request.data.get("isLidar", "")).lower() == "true"
 
         super().perform_update(serializer)
 

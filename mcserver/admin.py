@@ -20,6 +20,7 @@ from mcserver.models import (
 from django.contrib.auth.models import Group
 from django.contrib.auth.admin import UserAdmin, GroupAdmin
 from django.contrib.admin.models import LogEntry
+from django.db.models import Exists, OuterRef
 from datetime import timedelta
 
 
@@ -54,16 +55,23 @@ class TrialInline(admin.TabularInline):
 @admin.register(Session)
 class SessionAdmin(admin.ModelAdmin):
     list_display = (
-        'id', 'user', 'subject',
-        'public',
+        'id', 'user', 'subject', 'session_name',
+        'public', 'isMono',
         'created_at', 'updated_at', 'server',
         'status', 'status_changed',
-        'trashed', 'trashed_at', 'isMono',
+        'trashed', 'trashed_at',
     )
     raw_id_fields = ('user', 'subject')
-    search_fields = ['id', 'user__username', "subject__name"]
+    search_fields = ['id', 'user__username', 'subject__name', 'meta__sessionName', 'trial__name']
     inlines = [TrialInline]
     actions = ['set_subject']
+
+    def session_name(self, obj):
+        if obj.meta:
+            return obj.meta.get('sessionName', '')
+        return ''
+
+    session_name.short_description = 'Session name'
 
     def set_subject(self, request, queryset):
         from .forms import SubjectSelectForm
@@ -96,12 +104,13 @@ class ResultInline(admin.TabularInline):
 
 @admin.register(Trial)
 class TrialAdmin(admin.ModelAdmin):
-    search_fields = ['id', 'name', 'session__id']
+    search_fields = ['id', 'name', 'session__id', 'session__meta__sessionName']
     list_display = (
         'id',
         'name',
         'session',
         'status',
+        'has_lidar_data',
         'created_at', 'updated_at',
         'server', 'git_commit',
         'formatted_duration', 'formatted_count',
@@ -109,7 +118,22 @@ class TrialAdmin(admin.ModelAdmin):
         'trashed', 'trashed_at',
     )
     raw_id_fields = ('session',)
+    readonly_fields = ('has_lidar_data',)
     inlines = [ResultInline]
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        lidar_videos = Video.objects.filter(
+            trial=OuterRef('pk'),
+            isLidar=True,
+        )
+        return qs.annotate(_has_lidar_data=Exists(lidar_videos))
+
+    def has_lidar_data(self, obj):
+        return obj._has_lidar_data
+
+    has_lidar_data.short_description = 'Lidar'
+    has_lidar_data.boolean = True
 
     def is_meta_null(self, obj):
         return obj.meta is None
@@ -135,14 +159,15 @@ class ResultAdmin(admin.ModelAdmin):
         'id', 'trial', 'tag', 'media',
         'device_id',
         'created_at', 'updated_at')
-    search_fields = ['id', 'trial__id']
+    search_fields = ['id', 'trial__id', 'trial__name']
     raw_id_fields = ('trial',)
 
 
 @admin.register(Video)
 class VideoAdmin(admin.ModelAdmin):
-    search_fields = ['id', 'trial__id']
-    list_display = ('id', 'trial', 'video', 'created_at', 'updated_at')
+    search_fields = ['id', 'trial__id', 'trial__name']
+    list_display = ('id', 'trial', 'video', 'isLidar', 'created_at', 'updated_at')
+
     raw_id_fields = ('trial',)
 
 
