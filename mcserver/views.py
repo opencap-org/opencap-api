@@ -837,7 +837,7 @@ class SessionViewSet(viewsets.ModelViewSet):
             # otherwise it's ready again
             if session.save_local:
                 is_waiting_for_videos = any([
-                    (not v.saved_local) for v in trial.video_set.all()
+                    (not v.video and not v.saved_local) for v in trial.video_set.all()
                 ])
             else:
                 is_waiting_for_videos = any([
@@ -865,7 +865,7 @@ class SessionViewSet(viewsets.ModelViewSet):
         n_cameras_connected = Video.objects.filter(trial=trial).count()
         for video in Video.objects.filter(trial=trial).all():
             if session.save_local:
-                video_uploaded = video.saved_local
+                video_uploaded = video.video or video.saved_local
             else:
                 video_uploaded = video.video and video.video.url
             if video_uploaded:
