@@ -834,7 +834,16 @@ class SessionViewSet(viewsets.ModelViewSet):
             # if not all videos uploaded then the status is 'uploading'
             # if results are not ready then processing
             # otherwise it's ready again
-            if any([(not v.video) for v in trial.video_set.all()]):
+            if session.save_local:
+                is_waiting_for_videos = any([
+                    (not v.saved_local) for v in trial.video_set.all()
+                ])
+            else:
+                is_waiting_for_videos = any([
+                    (not v.video) for v in trial.video_set.all()
+                ])
+
+            if is_waiting_for_videos:
                 status = 'uploading'
             elif trial.result_set.count() == 0:
                 status = 'processing'
@@ -854,7 +863,11 @@ class SessionViewSet(viewsets.ModelViewSet):
         n_videos_uploaded = 0
         n_cameras_connected = Video.objects.filter(trial=trial).count()
         for video in Video.objects.filter(trial=trial).all():
-            if video.video and video.video.url:
+            if session.save_local:
+                video_uploaded = video.saved_local
+            else:
+                video_uploaded = video.video and video.video.url
+            if video_uploaded:
                 n_videos_uploaded = n_videos_uploaded + 1
 
         video_url = None
