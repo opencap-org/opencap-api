@@ -253,6 +253,52 @@ class SessionViewSet(viewsets.ModelViewSet):
     def api_health_check(self, request):
         return Response({"status": "True"})
 
+    @action(detail=True, methods=['get', 'patch'], permission_classes=[AllowAny])
+    def save_local(self, request, pk):
+        try:
+            if pk == 'undefined':
+                raise ValueError(_("undefined_uuid"))
+
+            session = get_object_or_404(Session, pk=pk)
+
+            if request.method == 'GET':
+                return Response({"save_local": session.save_local})
+
+            if not request.user.is_authenticated:
+                raise NotAuthenticated(_('login_needed'))
+
+            has_permission = (
+                IsOwner().has_permission(request, self) and
+                IsOwner().has_object_permission(request, self, session)
+            ) or IsAdmin().has_object_permission(request, self, session) or \
+                IsBackend().has_object_permission(request, self, session)
+
+            if not has_permission:
+                raise PermissionDenied(_('permission_denied'))
+
+            save_local = request.data.get('save_local', request.query_params.get('save_local'))
+            if isinstance(save_local, bool):
+                session.save_local = save_local
+            elif isinstance(save_local, str) and save_local.lower() in ['true', 'false']:
+                session.save_local = save_local.lower() == 'true'
+            else:
+                return Response(
+                    {'save_local': ['Expected true or false.']},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            session.save(update_fields=['save_local', 'updated_at'])
+            return Response({"save_local": session.save_local})
+
+        except Http404:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_("session_uuid_not_found") % {"uuid": str(pk)})
+        except ValueError:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_("session_uuid_not_valid") % {"uuid": str(pk)})
+
     @action(
         detail=True,
         methods=["get", "post"],
