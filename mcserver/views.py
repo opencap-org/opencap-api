@@ -1930,6 +1930,9 @@ class VideoViewSet(viewsets.ModelViewSet):
         if "isLidar" in self.request.data:
             serializer.validated_data["isLidar"] = str(self.request.data.get("isLidar", "")).lower() == "true"
 
+        if "saved_local" in self.request.data:
+            serializer.validated_data["saved_local"] = str(self.request.data.get("saved_local", "")).lower() == "true"
+
         super().perform_update(serializer)
 
 class ResultViewSet(viewsets.ModelViewSet):

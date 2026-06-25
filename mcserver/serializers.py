@@ -145,7 +145,7 @@ class VideoSerializer(serializers.ModelSerializer):
                                       required=False)
     class Meta:
         model = Video
-        fields = ['id', 'trial', 'device_id', 'video', 'video_url', 'video_thumb', 'parameters', 'isLidar', 'created_at', 'updated_at']
+        fields = ['id', 'trial', 'device_id', 'video', 'video_url', 'video_thumb', 'parameters', 'isLidar', 'saved_local', 'created_at', 'updated_at']
 
 
 # Serializers define the API representation.
