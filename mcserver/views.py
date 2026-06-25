@@ -757,6 +757,7 @@ class SessionViewSet(viewsets.ModelViewSet):
             if not user.is_authenticated:
                 user = User.objects.get(id=1)
             sessionNew.user = user
+            sessionNew.save_local = sessionOld.save_local
 
         except Http404:
             if settings.DEBUG:
