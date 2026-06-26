@@ -895,6 +895,7 @@ class SessionViewSet(viewsets.ModelViewSet):
         res = {
             "status": status,
             "trial": trial_url,
+            "trialname": trial.name if trial else None,
             "video": video_url,
             "framerate": frameRate,
             "newSessionURL": newSessionURL,

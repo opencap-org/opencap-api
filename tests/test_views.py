@@ -152,7 +152,9 @@ class ViewsTests(TestCase):
 
     def test_session_status_waits_for_video_field_when_not_save_local(self):
         session = Session.objects.create(user=self.user, save_local=False)
-        trial = Trial.objects.create(session=session, status='stopped')
+        trial = Trial.objects.create(
+            session=session, status='stopped', name='walk-fast'
+        )
         Video.objects.create(
             trial=trial, device_id=uuid.uuid4(), video='uploaded-a.mov',
             saved_local=True
@@ -166,6 +168,7 @@ class ViewsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'uploading')
+        self.assertEqual(response.data['trialname'], 'walk-fast')
         self.assertEqual(response.data['n_videos_uploaded'], 1)
 
         pending_video.video = 'uploaded-b.mov'
@@ -177,7 +180,9 @@ class ViewsTests(TestCase):
 
     def test_session_status_waits_for_video_or_saved_local_when_save_local(self):
         session = Session.objects.create(user=self.user, save_local=True)
-        trial = Trial.objects.create(session=session, status='stopped')
+        trial = Trial.objects.create(
+            session=session, status='stopped', name='squat-1'
+        )
         Video.objects.create(
             trial=trial, device_id=uuid.uuid4(), video='uploaded-a.mov',
             saved_local=False
@@ -194,6 +199,7 @@ class ViewsTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['status'], 'uploading')
+        self.assertEqual(response.data['trialname'], 'squat-1')
         self.assertEqual(response.data['n_videos_uploaded'], 2)
 
         pending_video.saved_local = True
