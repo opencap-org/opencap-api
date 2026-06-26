@@ -253,6 +253,52 @@ class SessionViewSet(viewsets.ModelViewSet):
     def api_health_check(self, request):
         return Response({"status": "True"})
 
+    @action(detail=True, methods=['get', 'patch'], permission_classes=[AllowAny])
+    def save_local(self, request, pk):
+        try:
+            if pk == 'undefined':
+                raise ValueError(_("undefined_uuid"))
+
+            session = get_object_or_404(Session, pk=pk)
+
+            if request.method == 'GET':
+                return Response({"save_local": session.save_local})
+
+            if not request.user.is_authenticated:
+                raise NotAuthenticated(_('login_needed'))
+
+            has_permission = (
+                IsOwner().has_permission(request, self) and
+                IsOwner().has_object_permission(request, self, session)
+            ) or IsAdmin().has_object_permission(request, self, session) or \
+                IsBackend().has_object_permission(request, self, session)
+
+            if not has_permission:
+                raise PermissionDenied(_('permission_denied'))
+
+            save_local = request.data.get('save_local', request.query_params.get('save_local'))
+            if isinstance(save_local, bool):
+                session.save_local = save_local
+            elif isinstance(save_local, str) and save_local.lower() in ['true', 'false']:
+                session.save_local = save_local.lower() == 'true'
+            else:
+                return Response(
+                    {'save_local': ['Expected true or false.']},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            session.save(update_fields=['save_local', 'updated_at'])
+            return Response({"save_local": session.save_local})
+
+        except Http404:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_("session_uuid_not_found") % {"uuid": str(pk)})
+        except ValueError:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_("session_uuid_not_valid") % {"uuid": str(pk)})
+
     @action(
         detail=True,
         methods=["get", "post"],
@@ -711,6 +757,7 @@ class SessionViewSet(viewsets.ModelViewSet):
             if not user.is_authenticated:
                 user = User.objects.get(id=1)
             sessionNew.user = user
+            sessionNew.save_local = sessionOld.save_local
 
         except Http404:
             if settings.DEBUG:
@@ -788,7 +835,16 @@ class SessionViewSet(viewsets.ModelViewSet):
             # if not all videos uploaded then the status is 'uploading'
             # if results are not ready then processing
             # otherwise it's ready again
-            if any([(not v.video) for v in trial.video_set.all()]):
+            if session.save_local:
+                is_waiting_for_videos = any([
+                    (not v.video and not v.saved_local) for v in trial.video_set.all()
+                ])
+            else:
+                is_waiting_for_videos = any([
+                    (not v.video) for v in trial.video_set.all()
+                ])
+
+            if is_waiting_for_videos:
                 status = 'uploading'
             elif trial.result_set.count() == 0:
                 status = 'processing'
@@ -808,7 +864,11 @@ class SessionViewSet(viewsets.ModelViewSet):
         n_videos_uploaded = 0
         n_cameras_connected = Video.objects.filter(trial=trial).count()
         for video in Video.objects.filter(trial=trial).all():
-            if video.video and video.video.url:
+            if session.save_local:
+                video_uploaded = video.video or video.saved_local
+            else:
+                video_uploaded = video.video and video.video.url
+            if video_uploaded:
                 n_videos_uploaded = n_videos_uploaded + 1
 
         video_url = None
@@ -835,6 +895,7 @@ class SessionViewSet(viewsets.ModelViewSet):
         res = {
             "status": status,
             "trial": trial_url,
+            "trialname": trial.name if trial else None,
             "video": video_url,
             "framerate": frameRate,
             "newSessionURL": newSessionURL,
@@ -1883,6 +1944,9 @@ class VideoViewSet(viewsets.ModelViewSet):
 
         if "isLidar" in self.request.data:
             serializer.validated_data["isLidar"] = str(self.request.data.get("isLidar", "")).lower() == "true"
+
+        if "saved_local" in self.request.data:
+            serializer.validated_data["saved_local"] = str(self.request.data.get("saved_local", "")).lower() == "true"
 
         super().perform_update(serializer)
 

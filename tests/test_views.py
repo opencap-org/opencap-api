@@ -1,11 +1,13 @@
 from unittest import mock
+import uuid
 from django.test import TestCase
 
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.reverse import reverse
 
 from mcserver.models import (
-    User, AnalysisFunction, AnalysisResult, AnalysisResultState
+    User, AnalysisFunction, AnalysisResult, AnalysisResultState,
+    Session, Trial, Video
 )
 from mcserver.serializers import (
     AnalysisFunctionSerializer, AnalysisResultSerializer
@@ -147,3 +149,62 @@ class ViewsTests(TestCase):
             )
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.data, AnalysisResultSerializer(result).data)
+
+    def test_session_status_waits_for_video_field_when_not_save_local(self):
+        session = Session.objects.create(user=self.user, save_local=False)
+        trial = Trial.objects.create(
+            session=session, status='stopped', name='walk-fast'
+        )
+        Video.objects.create(
+            trial=trial, device_id=uuid.uuid4(), video='uploaded-a.mov',
+            saved_local=True
+        )
+        pending_video = Video.objects.create(
+            trial=trial, device_id=uuid.uuid4(), saved_local=True
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.get(f'/sessions/{session.pk}/status/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'uploading')
+        self.assertEqual(response.data['trialname'], 'walk-fast')
+        self.assertEqual(response.data['n_videos_uploaded'], 1)
+
+        pending_video.video = 'uploaded-b.mov'
+        pending_video.save(update_fields=['video'])
+        response = self.client.get(f'/sessions/{session.pk}/status/')
+
+        self.assertEqual(response.data['status'], 'processing')
+        self.assertEqual(response.data['n_videos_uploaded'], 2)
+
+    def test_session_status_waits_for_video_or_saved_local_when_save_local(self):
+        session = Session.objects.create(user=self.user, save_local=True)
+        trial = Trial.objects.create(
+            session=session, status='stopped', name='squat-1'
+        )
+        Video.objects.create(
+            trial=trial, device_id=uuid.uuid4(), video='uploaded-a.mov',
+            saved_local=False
+        )
+        Video.objects.create(
+            trial=trial, device_id=uuid.uuid4(), video='', saved_local=True
+        )
+        pending_video = Video.objects.create(
+            trial=trial, device_id=uuid.uuid4(), video='', saved_local=False
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.get(f'/sessions/{session.pk}/status/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['status'], 'uploading')
+        self.assertEqual(response.data['trialname'], 'squat-1')
+        self.assertEqual(response.data['n_videos_uploaded'], 2)
+
+        pending_video.saved_local = True
+        pending_video.save(update_fields=['saved_local'])
+        response = self.client.get(f'/sessions/{session.pk}/status/')
+
+        self.assertEqual(response.data['status'], 'processing')
+        self.assertEqual(response.data['n_videos_uploaded'], 3)
