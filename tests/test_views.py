@@ -1,6 +1,9 @@
 from unittest import mock
 import uuid
+from datetime import timedelta
 from django.test import TestCase
+from django.utils import timezone
+from django.contrib.auth.models import Group
 
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.reverse import reverse
@@ -208,3 +211,24 @@ class ViewsTests(TestCase):
 
         self.assertEqual(response.data['status'], 'processing')
         self.assertEqual(response.data['n_videos_uploaded'], 3)
+
+    def test_dequeue_does_not_pick_old_pending_saved_local_uploads(self):
+        admin_group, _ = Group.objects.get_or_create(name='admin')
+        self.user.groups.add(admin_group)
+
+        session = Session.objects.create(user=self.user, save_local=True)
+        trial = Trial.objects.create(session=session, status='stopped', name='walk-offline')
+        video = Video.objects.create(
+            trial=trial,
+            device_id=uuid.uuid4(),
+            video='',
+            saved_local=True,
+        )
+        Video.objects.filter(pk=video.pk).update(
+            updated_at=timezone.now() - timedelta(hours=2)
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.get('/trials/dequeue/')
+
+        self.assertEqual(response.status_code, 404)

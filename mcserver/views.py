@@ -1665,9 +1665,16 @@ class TrialViewSet(viewsets.ModelViewSet):
 
 
 
-            # find trials with some videos not uploaded
-            not_uploaded = Video.objects.filter(video='',
-                                                updated_at__gte=timezone.now() + timedelta(minutes=-15)).values_list("trial__id", flat=True)
+            # Trials are considered waiting-for-upload when at least one video is missing.
+            # Keep the 15-minute grace period for normal uploads, but always wait when
+            # a missing video is explicitly marked as saved locally on phones for upload later.
+            missing_video_q = Q(video='') | Q(video__isnull=True)
+            not_uploaded = Video.objects.filter(
+                missing_video_q,
+            ).filter(
+                Q(updated_at__gte=timezone.now() + timedelta(minutes=-1)) |
+                Q(saved_local=True)
+            ).values_list("trial__id", flat=True)
             
 
             if isMonoQuery == 'False':
