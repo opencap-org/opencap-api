@@ -1672,7 +1672,7 @@ class TrialViewSet(viewsets.ModelViewSet):
             not_uploaded = Video.objects.filter(
                 missing_video_q,
             ).filter(
-                Q(updated_at__gte=timezone.now() + timedelta(minutes=-1)) |
+                Q(updated_at__gte=timezone.now() + timedelta(minutes=-15)) |
                 Q(saved_local=True)
             ).values_list("trial__id", flat=True)
             
