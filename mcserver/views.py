@@ -1665,23 +1665,26 @@ class TrialViewSet(viewsets.ModelViewSet):
 
 
 
-            # Trials are considered waiting-for-upload when at least one video is missing.
-            # Keep the 15-minute grace period for normal uploads, but always wait when
-            # a missing video is explicitly marked as saved locally on phones for upload later.
-            missing_video_q = Q(video='') | Q(video__isnull=True)
+            # Trials are waiting-for-upload when a missing video was updated
+            # recently. Do not dequeue trials with non-uploaded videos
+            # or saved-local videos, within the 7 day updated-at window.
+            active_trial_cutoff = timezone.now() + timedelta(days=-4)
+            recent_video_cutoff = timezone.now() + timedelta(minutes=-15)
+            missing_video_q = Q(video='')
             not_uploaded = Video.objects.filter(
                 missing_video_q,
+                trial__updated_at__gte=active_trial_cutoff,
             ).filter(
-                Q(updated_at__gte=timezone.now() + timedelta(minutes=-15)) |
+                Q(updated_at__gte=recent_video_cutoff) |
                 Q(saved_local=True)
             ).values_list("trial__id", flat=True)
             
 
             if isMonoQuery == 'False':
-                uploaded_trials = Trial.objects.filter(updated_at__gte=timezone.now() + timedelta(days=-7)).exclude(
+                uploaded_trials = Trial.objects.filter(updated_at__gte=active_trial_cutoff).exclude(
                                                         id__in=not_uploaded).exclude(session__isMono=True)
             else:
-                uploaded_trials = Trial.objects.filter(updated_at__gte=timezone.now() + timedelta(days=-7)).exclude(
+                uploaded_trials = Trial.objects.filter(updated_at__gte=active_trial_cutoff).exclude(
                                                         id__in=not_uploaded).filter(session__isMono=True)
 
             if workerType != 'dynamic':
