@@ -145,7 +145,7 @@ class VideoSerializer(serializers.ModelSerializer):
                                       required=False)
     class Meta:
         model = Video
-        fields = ['id', 'trial', 'device_id', 'video', 'video_url', 'video_thumb', 'parameters', 'isLidar', 'created_at', 'updated_at']
+        fields = ['id', 'trial', 'device_id', 'video', 'video_url', 'video_thumb', 'parameters', 'isLidar', 'saved_local', 'created_at', 'updated_at']
 
 
 # Serializers define the API representation.
@@ -237,7 +237,7 @@ class SessionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'public', 'name', 'sessionName',
             'qrcode', 'meta', 'trials', 'server',
-            'subject', 'isMono',
+            'subject', 'isMono', 'save_local',
             'created_at', 'updated_at',
             'trashed', 'trashed_at', 'trials_count', 'trashed_trials_count',
         ]
@@ -255,7 +255,7 @@ class ValidSessionLightSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'public', 'name', 'sessionName',
             'qrcode', 'meta', 'trials', 'server',
-            'subject', 'isMono',
+            'subject', 'isMono', 'save_local',
             'created_at', 'updated_at',
             'trashed', 'trashed_at', 'trials_count', 'trashed_trials_count',
         ]

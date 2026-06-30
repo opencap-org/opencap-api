@@ -80,6 +80,7 @@ class Session(models.Model):
     trashed_at = models.DateTimeField(blank=True, null=True)
     
     isMono = models.BooleanField(default=False, db_index=True)
+    save_local = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['-created_at']
@@ -179,6 +180,7 @@ class Video(models.Model):
     keypoints = models.FileField(blank=True, null=True)
     parameters = models.JSONField(blank=True, null=True)
     isLidar = models.BooleanField(default=False)
+    saved_local = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
 
