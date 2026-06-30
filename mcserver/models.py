@@ -81,6 +81,7 @@ class Session(models.Model):
     
     isMono = models.BooleanField(default=False, db_index=True)
     save_local = models.BooleanField(default=False)
+    useLidar = models.BooleanField(default=False)
 
     class Meta:
         ordering = ['-created_at']

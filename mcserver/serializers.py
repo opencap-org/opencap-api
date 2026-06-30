@@ -237,7 +237,7 @@ class SessionSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'public', 'name', 'sessionName',
             'qrcode', 'meta', 'trials', 'server',
-            'subject', 'isMono', 'save_local',
+            'subject', 'isMono', 'save_local', 'useLidar',
             'created_at', 'updated_at',
             'trashed', 'trashed_at', 'trials_count', 'trashed_trials_count',
         ]
@@ -255,7 +255,7 @@ class ValidSessionLightSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'public', 'name', 'sessionName',
             'qrcode', 'meta', 'trials', 'server',
-            'subject', 'isMono', 'save_local',
+            'subject', 'isMono', 'save_local', 'useLidar',
             'created_at', 'updated_at',
             'trashed', 'trashed_at', 'trials_count', 'trashed_trials_count',
         ]
