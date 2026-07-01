@@ -903,6 +903,7 @@ class SessionViewSet(viewsets.ModelViewSet):
             if trial.video_set.filter(device_id=request.GET["device_id"]).count() == 0:
                 video = Video()
                 video.device_id = request.GET["device_id"]
+                video.isLidar = str(request.GET.get("usingLidar", "")).lower() == "true"
                 video.trial = trial
                 video.save()
             status = "recording"
@@ -917,6 +918,8 @@ class SessionViewSet(viewsets.ModelViewSet):
                 video_uploaded = video.video and video.video.url
             if video_uploaded:
                 n_videos_uploaded = n_videos_uploaded + 1
+        if "device_id" not in request.GET:
+            n_cameras_using_lidar = trial.video_set.filter(isLidar=True).count() if trial else 0
 
         video_url = None
         if trial and trial.status == "recording" and "device_id" in request.GET:
@@ -950,6 +953,9 @@ class SessionViewSet(viewsets.ModelViewSet):
             "n_cameras_connected": n_cameras_connected,
             "n_videos_uploaded": n_videos_uploaded
         }
+
+        if "device_id" not in request.GET:
+            res["n_cameras_using_lidar"] = n_cameras_using_lidar
 
         if "ret_session" in request.GET:
             res["session"] = SessionSerializer(session, many=False).data
