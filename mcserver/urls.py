@@ -44,7 +44,8 @@ from mcserver.views import (
     AnalysisDashboardViewSet,
     GetUserInfo,
     UserUpdate,
-    UpdateProfilePicture
+    UpdateProfilePicture,
+    UserGroupsView
 )
 from rest_framework import routers, serializers, viewsets
 from rest_framework.authtoken.views import obtain_auth_token
@@ -98,6 +99,7 @@ urlpatterns = [
     path('reset-password/', ResetPasswordView.as_view()),
     path('new-password/', NewPasswordView.as_view()),
     path('user-institutional-use/', UserInstitutionalUseView.as_view()),
+    path('user-groups/', UserGroupsView.as_view(), name='user-groups'),
     path('swagger<format>/', schema_view.without_ui(cache_timeout=0), name='schema-json'),
     path('docs/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redocs/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),

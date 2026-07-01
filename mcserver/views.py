@@ -2703,6 +2703,16 @@ class UserInstitutionalUseView(APIView):
         return Response(serializer.data)
 
 
+class UserGroupsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, format='json'):
+        group_names = list(request.user.groups.values_list('name', flat=True))
+        return Response({
+            'groups': group_names,
+        })
+
+
 class AnalysisFunctionsListAPIView(ListAPIView):
     """ Returns active AnalysisFunction's.
     """
