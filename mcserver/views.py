@@ -299,6 +299,52 @@ class SessionViewSet(viewsets.ModelViewSet):
                 raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
             raise NotFound(_("session_uuid_not_valid") % {"uuid": str(pk)})
 
+    @action(detail=True, methods=['get', 'patch'], permission_classes=[AllowAny])
+    def useLidar(self, request, pk):
+        try:
+            if pk == 'undefined':
+                raise ValueError(_("undefined_uuid"))
+
+            session = get_object_or_404(Session, pk=pk)
+
+            if request.method == 'GET':
+                return Response({"useLidar": session.useLidar})
+
+            if not request.user.is_authenticated:
+                raise NotAuthenticated(_('login_needed'))
+
+            has_permission = (
+                IsOwner().has_permission(request, self) and
+                IsOwner().has_object_permission(request, self, session)
+            ) or IsAdmin().has_object_permission(request, self, session) or \
+                IsBackend().has_object_permission(request, self, session)
+
+            if not has_permission:
+                raise PermissionDenied(_('permission_denied'))
+
+            useLidar = request.data.get('useLidar', request.query_params.get('useLidar'))
+            if isinstance(useLidar, bool):
+                session.useLidar = useLidar
+            elif isinstance(useLidar, str) and useLidar.lower() in ['true', 'false']:
+                session.useLidar = useLidar.lower() == 'true'
+            else:
+                return Response(
+                    {'useLidar': ['Expected true or false.']},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            session.save(update_fields=['useLidar', 'updated_at'])
+            return Response({"useLidar": session.useLidar})
+
+        except Http404:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_("session_uuid_not_found") % {"uuid": str(pk)})
+        except ValueError:
+            if settings.DEBUG:
+                raise APIException(_("error") % {"error_message": str(traceback.format_exc())})
+            raise NotFound(_("session_uuid_not_valid") % {"uuid": str(pk)})
+
     @action(
         detail=True,
         methods=["get", "post"],
@@ -758,6 +804,7 @@ class SessionViewSet(viewsets.ModelViewSet):
                 user = User.objects.get(id=1)
             sessionNew.user = user
             sessionNew.save_local = sessionOld.save_local
+            sessionNew.useLidar = sessionOld.useLidar
 
         except Http404:
             if settings.DEBUG:
