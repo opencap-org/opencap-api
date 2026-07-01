@@ -945,6 +945,7 @@ class SessionViewSet(viewsets.ModelViewSet):
             "trialname": trial.name if trial else None,
             "video": video_url,
             "framerate": frameRate,
+            "useLidar": session.useLidar,
             "newSessionURL": newSessionURL,
             "n_cameras_connected": n_cameras_connected,
             "n_videos_uploaded": n_videos_uploaded
