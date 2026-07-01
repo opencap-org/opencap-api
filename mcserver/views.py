@@ -1037,6 +1037,10 @@ class SessionViewSet(viewsets.ModelViewSet):
                 name = "{}_{}".format(name, highest_count + 1)
 
             trial.name = name
+            session.trial_set.filter(status="recording").update(
+                status="error",
+                updated_at=timezone.now()
+            )
             trial.save()
 
             if name == "calibration" or name == "neutral":
