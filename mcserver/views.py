@@ -969,6 +969,7 @@ class SessionViewSet(viewsets.ModelViewSet):
             session = get_object_or_404(Session, pk=pk, user=request.user)
 
             name = request.GET.get("name", None)
+            auto_stop = request.GET.get("auto_stop", "true").lower() != "false"
 
             trial = Trial()
             trial.session = session
@@ -985,7 +986,7 @@ class SessionViewSet(viewsets.ModelViewSet):
             trial.name = name
             trial.save()
 
-            if name == "calibration" or name == "neutral":
+            if (name == "calibration" or name == "neutral") and auto_stop:
                 time.sleep(2)
                 return self.stop(request, pk)
 
