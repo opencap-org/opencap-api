@@ -1992,9 +1992,14 @@ class SubjectViewSet(viewsets.ModelViewSet):
         """
         This view should return a list of all the subjects
         for the currently authenticated user.
+
+        By default this is limited to the user's own subjects. Admin and
+        backend users may pass ?all_subjects=true to list every user's
+        subjects; for all other users the flag is ignored.
         """
         user = self.request.user
-        if user.is_authenticated and user.groups.filter(name__in=["admin", "backend"]).exists():
+        all_subjects = self.request.query_params.get('all_subjects', 'false') == 'true'
+        if all_subjects and user.is_authenticated and user.groups.filter(name__in=["admin", "backend"]).exists():
             return Subject.objects.all().prefetch_related('subjecttags_set')
         # public_subject_ids = Session.objects.filter(public=True).values_list('subject_id', flat=True).distinct()
         # return Subject.objects.filter(Q(user=user) | Q(id__in=public_subject_ids)).prefetch_related('subjecttags_set')

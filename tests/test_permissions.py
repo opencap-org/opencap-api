@@ -916,21 +916,58 @@ class SubjectPermissionsTests(UserSetupMixin, APITestCase):
         self.subject = Subject.objects.create(name='test_subject', user=self.owner)
         self.detail_url = f'/subjects/{self.subject.pk}/'
 
+    def _returned_ids(self, resp):
+        # Ids come back as UUIDs; compare as strings to avoid type mismatches.
+        return {str(s['id']) for s in resp.data['subjects']}
+
     def test_get_list(self):
-        # Test GET /subjects/ (list)
+        # Test GET /subjects/ (list) - by default every user, including admin
+        # and backend, only sees their own subjects.
         self._setup_subject()
+        other_subject = Subject.objects.create(name='other_subject', user=self.other_user)
+
+        # Exact subjects each role should see by default (their own only).
+        expected_ids = {
+            'owner': {str(self.subject.pk)},
+            'admin': set(),
+            'backend': set(),
+            'other': {str(other_subject.pk)},
+        }
         for role in self.users:
             with self.subTest(role=role):
                 self.client.force_authenticate(user=self.users[role])
                 resp = self.client.get(self.list_url)
 
-                if role in ['owner', 'admin', 'backend', 'other']:
+                if role in expected_ids:
                     self.assertEqual(resp.status_code, 200)
+                    self.assertEqual(self._returned_ids(resp), expected_ids[role])
+                    self.assertEqual(resp.data['total'], len(expected_ids[role]))
+                else:
+                    self.assertEqual(resp.status_code, 403)
 
-                    if role in ['owner', 'admin', 'backend']:
-                        self.assertEqual(len(resp.data['subjects']), 1)
-                    else:
-                        self.assertEqual(len(resp.data['subjects']), 0)
+    def test_get_list_all_subjects_flag(self):
+        # Test GET /subjects/?all_subjects=true - admin/backend can list every
+        # user's subjects; the flag is ignored for everyone else.
+        self._setup_subject()
+        other_subject = Subject.objects.create(name='other_subject', user=self.other_user)
+        all_ids = {str(self.subject.pk), str(other_subject.pk)}
+
+        # Elevated roles see every subject; everyone else still only their own.
+        expected_ids = {
+            'admin': all_ids,
+            'backend': all_ids,
+            'owner': {str(self.subject.pk)},
+            'other': {str(other_subject.pk)},
+        }
+        for role in self.users:
+            with self.subTest(role=role):
+                self.client.force_authenticate(user=self.users[role])
+                resp = self.client.get(self.list_url, {'all_subjects': 'true'})
+
+                if role in expected_ids:
+                    self.assertEqual(resp.status_code, 200)
+                    self.assertEqual(self._returned_ids(resp), expected_ids[role])
+                    self.assertEqual(resp.data['total'], len(expected_ids[role]))
                 else:
                     self.assertEqual(resp.status_code, 403)
 
