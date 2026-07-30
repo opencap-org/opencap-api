@@ -1,4 +1,5 @@
 import tempfile
+import uuid
 import zipfile
 from unittest import mock
 from django.contrib.auth.models import Group
@@ -381,6 +382,26 @@ class SessionsPermissionsTests(UserSetupMixin, APITestCase):
                     url = f'/sessions/{self.session.pk}/status/'
                     resp = self.client.get(url)
                     self.assertEqual(resp.status_code, 200)
+
+    def test_status_assigns_stable_phone_labels(self):
+        self._setup_session(public=False)
+        self.client.force_authenticate(user=self.owner)
+        first_device = str(uuid.uuid4())
+        second_device = str(uuid.uuid4())
+
+        first_resp = self.client.get(
+            f'/sessions/{self.session.pk}/status/?device_id={first_device}')
+        second_resp = self.client.get(
+            f'/sessions/{self.session.pk}/status/?device_id={second_device}')
+        first_again_resp = self.client.get(
+            f'/sessions/{self.session.pk}/status/?device_id={first_device}')
+
+        self.assertEqual(first_resp.data["phone_label"], "Phone 1")
+        self.assertEqual(first_resp.data["camera_label"], "Cam0")
+        self.assertEqual(second_resp.data["phone_label"], "Phone 2")
+        self.assertEqual(second_resp.data["camera_label"], "Cam1")
+        self.assertEqual(first_again_resp.data["phone_label"], "Phone 1")
+        self.assertEqual(first_again_resp.data["camera_label"], "Cam0")
 
     def test_record(self):
         for public in [False, True]:

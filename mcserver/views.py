@@ -91,6 +91,28 @@ from rest_framework import status
 
 sys.path.insert(0, '/code/mobilecap')
 
+def _normalize_device_id(device_id):
+    return str(device_id).replace('-', '').upper()
+
+def _get_or_assign_phone_label(session, device_id):
+    if not device_id:
+        return None
+
+    if not session.meta:
+        session.meta = {}
+
+    camera_map = session.meta.setdefault("camera_map", {})
+    normalized_device_id = _normalize_device_id(device_id)
+    if normalized_device_id not in camera_map:
+        phone_number = len(camera_map) + 1
+        camera_map[normalized_device_id] = {
+            "phone_label": "Phone {}".format(phone_number),
+            "camera_label": "Cam{}".format(phone_number - 1),
+        }
+        session.save(update_fields=["meta"])
+
+    return camera_map[normalized_device_id]
+
 class IsOwner(permissions.BasePermission):
     def has_permission(self, request, view):
         if not request.user.is_authenticated:
@@ -865,6 +887,8 @@ class SessionViewSet(viewsets.ModelViewSet):
 
         trials = session.trial_set.order_by("-created_at")
         trial = None
+        device_id = request.GET.get("device_id")
+        phone_label = _get_or_assign_phone_label(session, device_id)
 
         status = "ready" # if no trials then "ready" (equivalent to trial_status = done)
 
@@ -899,10 +923,10 @@ class SessionViewSet(viewsets.ModelViewSet):
                 status = 'ready'
 
         # If status 'recording' and 'device_id' provided
-        if trial and trial.status == "recording" and "device_id" in request.GET:
-            if trial.video_set.filter(device_id=request.GET["device_id"]).count() == 0:
+        if trial and trial.status == "recording" and device_id:
+            if trial.video_set.filter(device_id=device_id).count() == 0:
                 video = Video()
-                video.device_id = request.GET["device_id"]
+                video.device_id = device_id
                 video.isLidar = str(request.GET.get("usingLidar", "")).lower() == "true"
                 video.trial = trial
                 video.save()
@@ -922,8 +946,8 @@ class SessionViewSet(viewsets.ModelViewSet):
             n_cameras_using_lidar = trial.video_set.filter(isLidar=True).count() if trial else 0
 
         video_url = None
-        if trial and trial.status == "recording" and "device_id" in request.GET:
-            videos = trial.video_set.filter(device_id=request.GET["device_id"])
+        if trial and trial.status == "recording" and device_id:
+            videos = trial.video_set.filter(device_id=device_id)
             if videos.count() > 0:
                 video_url = reverse('video-detail', kwargs={'pk': videos[0].id})
         trial_url = reverse('trial-detail', kwargs={'pk': trial.id}) if trial else None
@@ -958,6 +982,9 @@ class SessionViewSet(viewsets.ModelViewSet):
 
         if "device_id" not in request.GET:
             res["n_cameras_using_lidar"] = n_cameras_using_lidar
+
+        if phone_label:
+            res.update(phone_label)
 
         if "ret_session" in request.GET:
             res["session"] = SessionSerializer(session, many=False).data
