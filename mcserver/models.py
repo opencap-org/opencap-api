@@ -1,24 +1,25 @@
-import json
-
-from django.db import models
-from django.contrib.auth.models import AbstractUser
-from django.core.validators import MinValueValidator, MaxValueValidator
 import os
 import uuid
-import base64
-import pathlib
 from http import HTTPStatus
-from django.utils import timezone
+
+from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
-from django.db.models.signals import post_save
-from django.contrib.auth.signals import user_logged_in
+from django.db import models
+from django.db.models.signals import post_save, pre_delete
 from django.dispatch import receiver
-from rest_framework.authtoken.models import Token
+from django.utils import timezone
 from django.utils.translation import gettext as _
-from rest_framework import status
 
-from django.conf import settings
 
+def delete_s3_file(file_field):
+    """Delete a file from the configured Django storage backend."""
+    if not file_field or not file_field.name:
+        return
+
+    try:
+        file_field.delete(save=False)
+    except Exception as e:
+        print(f"Error deleting file '{file_field.name}': {e}")
 
 def random_filename(instance, filename):
     return "{}-{}".format(uuid.uuid4(), filename)
@@ -255,8 +256,7 @@ class ResetPassword(models.Model):
     datetime = models.DateField(default=timezone.now)
 
 from django_otp.plugins.otp_email.models import EmailDevice
-from django.template.loader import render_to_string
-from mcserver.customEmailDevice import CustomEmailDevice
+
 
 @receiver(post_save, sender=User)
 def create_profile(sender, instance, created, **kwargs):
@@ -572,3 +572,25 @@ class AnalysisDashboard(models.Model):
                 subject_ids.append(subject.id)
 
         return data
+
+@receiver(pre_delete, sender=Video)
+def delete_video_files(sender, instance, **kwargs):
+    """Delete Video files when the record is deleted."""
+    delete_s3_file(instance.video)
+    delete_s3_file(instance.video_thumb)
+    delete_s3_file(instance.keypoints)
+
+@receiver(pre_delete, sender=Result)
+def delete_result_files(sender, instance, **kwargs):
+    """Delete Result media when the record is deleted."""
+    delete_s3_file(instance.media)
+
+@receiver(pre_delete, sender=Session)
+def delete_session_files(sender, instance, **kwargs):
+    """Delete Session QR code when the record is deleted."""
+    delete_s3_file(instance.qrcode)
+
+@receiver(pre_delete, sender=DownloadLog)
+def delete_download_log_files(sender, instance, **kwargs):
+    """Delete DownloadLog archive when the record is deleted."""
+    delete_s3_file(instance.media)
