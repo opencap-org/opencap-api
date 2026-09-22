@@ -1714,33 +1714,49 @@ class TrialViewSet(viewsets.ModelViewSet):
                 if not trials.exists() and not trialsReprocess.exists():
                     raise Http404
 
-                # prioritize admin and priority group trials (priority group doesn't exist yet, but should have same priv. as user)
-                trialsPrioritized = trials.filter(session__user__groups__name__in=["admin"])
-                # if no admin trials, go to priority group trials
-                if not trialsPrioritized.exists():
-                    trialsPrioritized = trials.filter(session__user__groups__name__in=["priority"])
-                # if not priority trials, go to normal trials
-                if not trialsPrioritized.exists():
-                    trialsPrioritized = trials
-                # if no normal trials, go to reprocess trials
-                if not trials.exists():
-                    trialsPrioritized = trialsReprocess
-
-                trial = trialsPrioritized.select_for_update(
+                # Try admin trials first.
+                trial = trials.filter(
+                    session__user__groups__name__in=["admin"]
+                ).order_by("created_at", "id").select_for_update(
                     skip_locked=True,
                     of=("self",)
                 ).first()
 
-                if trial:
-                    trial.status = "processing"
-                    trial.server = ip
-                    trial.processed_count += 1
-                    trial.save()
+                # If all admin trials are locked (or none exist), try priority trials.
+                if not trial:
+                    trial = trials.filter(
+                        session__user__groups__name__in=["priority"]
+                    ).order_by("created_at", "id").select_for_update(
+                        skip_locked=True,
+                        of=("self",)
+                    ).first()
 
-                    if (not trial.session.server) or len(trial.session.server) < 1:
-                        session = Session.objects.get(id=trial.session.id)
-                        session.server = ip
-                        session.save()
+                # If all priority trials are locked (or none exist), try normal trials.
+                if not trial:
+                    trial = trials.order_by("created_at", "id").select_for_update(
+                        skip_locked=True,
+                        of=("self",)
+                    ).first()
+
+                # Finally, try reprocess trials.
+                if not trial:
+                    trial = trialsReprocess.order_by("created_at", "id").select_for_update(
+                        skip_locked=True,
+                        of=("self",)
+                    ).first()
+
+                if not trial:
+                    raise Http404
+
+                trial.status = "processing"
+                trial.server = ip
+                trial.processed_count += 1
+                trial.save()
+
+                if (not trial.session.server) or len(trial.session.server) < 1:
+                    session = Session.objects.get(id=trial.session.id)
+                    session.server = ip
+                    session.save()
 
                 serializer = TrialSerializer(trial, many=False)
 
