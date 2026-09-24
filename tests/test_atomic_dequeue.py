@@ -291,7 +291,7 @@ class DequeueConcurrencyTest(TransactionTestCase):
         client = APIClient()
         client.force_authenticate(user=self.user)
 
-        # No eligible trials available.
+        # No eligible trials available (Return 404)
         Trial.objects.all().delete()
 
         response = client.get(
@@ -300,7 +300,7 @@ class DequeueConcurrencyTest(TransactionTestCase):
         )
         self.assertEqual(response.status_code, 404)
 
-        # An eligible trial is available.
+        # An eligible trial is available (Return 200)
         Trial.objects.create(
             session=self.session,
             name="calibration",
@@ -313,3 +313,85 @@ class DequeueConcurrencyTest(TransactionTestCase):
             REMOTE_ADDR="127.0.0.1",
         )
         self.assertEqual(response.status_code, 200)
+
+        # An eligible trial exists, but is locked by another worker (First worker locks
+        # a trial, while the second tries to get it. Since it is locked, it returns 404.)
+        Trial.objects.all().delete()
+
+        locked_trial = Trial.objects.create(
+            session=self.session,
+            name="calibration",
+            status="stopped",
+            result=None,
+        )
+
+        results = {}
+        trial_locked = threading.Event()
+        worker2_done = threading.Event()
+
+        def worker_1():
+            # This worker should lock the only available trial.
+            try:
+                with transaction.atomic():
+                    Trial.objects.select_for_update().get(
+                        pk=locked_trial.pk
+                    )
+
+                    trial_locked.set()
+
+                    # Hold the lock until Worker 2 has attempted dequeue.
+                    if not worker2_done.wait(timeout=10):
+                        raise AssertionError("Timed out waiting for Worker 2")
+            except Exception as e:
+                results["worker1_error"] = f"Exception: {str(e)}"
+            finally:
+                connection.close()
+
+        def worker_2():
+            # This worker should attempt to get the trial. Since it is locked,
+            # and it is the only one available, should return 404.
+            try:
+                if not trial_locked.wait(timeout=10):
+                    results["worker2_error"] = (
+                        "Timed out waiting for Worker 1 to acquire the trial lock"
+                    )
+                    return
+
+                response = client.get(
+                    self.dequeue_url,
+                    REMOTE_ADDR="127.0.0.1",
+                )
+
+                if response.status_code == 404:
+                    results["worker2"] = True
+                else:
+                    results["worker2_error"] = (
+                        f"HTTP {response.status_code}: "
+                        f"{response.content.decode('utf-8')[:200]}"
+                    )
+            except Exception as e:
+                results["worker2_error"] = f"Exception: {str(e)}"
+            finally:
+                worker2_done.set()
+                connection.close()
+
+        t1 = threading.Thread(target=worker_1)
+        t2 = threading.Thread(target=worker_2)
+
+        t1.start()
+        t2.start()
+
+        t1.join(timeout=15)
+        t2.join(timeout=15)
+
+        self.assertFalse(t1.is_alive(), "Worker 1 did not finish")
+        self.assertFalse(t2.is_alive(), "Worker 2 did not finish")
+
+        self.assertIsNone(
+            results.get("worker1_error"),
+            f"Worker 1 failed! Reason: {results.get('worker1_error')}",
+        )
+        self.assertTrue(
+            results.get("worker2"),
+            f"Worker 2 failed! Reason: {results.get('worker2_error')}",
+        )
