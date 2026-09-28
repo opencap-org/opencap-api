@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 from django.test import TransactionTestCase
 from django.db import connection, transaction
-from django.urls import reverse, NoReverseMatch
 from rest_framework.test import APIClient
 
 from mcserver.models import Trial, Session
@@ -46,14 +45,8 @@ class DequeueConcurrencyTest(TransactionTestCase):
             result=None
         )
 
-        # 3. Dynamically resolve the URL to guarantee we hit the right endpoint
-        try:
-            self.dequeue_url = reverse('trial-dequeue')
-        except NoReverseMatch:
-            try:
-                self.dequeue_url = reverse('trials-dequeue')
-            except NoReverseMatch:
-                self.dequeue_url = '/api/trials/dequeue/'
+        # 3. Use the same URL as the client in opencap-core.
+        self.dequeue_url = "/trials/dequeue/"
 
     def test_concurrent_dequeue_skips_locked_rows(self):
         client1 = APIClient()
