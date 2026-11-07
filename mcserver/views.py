@@ -1760,7 +1760,7 @@ class TrialViewSet(viewsets.ModelViewSet):
                 # Trials are waiting-for-upload when a missing video was updated
                 # recently. Do not dequeue trials with non-uploaded videos
                 # or saved-local videos, within the 7 day updated-at window.
-                active_trial_cutoff = timezone.now() + timedelta(days=-14)
+                active_trial_cutoff = timezone.now() + timedelta(days=-4)
                 recent_video_cutoff = timezone.now() + timedelta(minutes=-15)
                 missing_video_q = Q(video='')
                 not_uploaded = Video.objects.filter(
